@@ -60,10 +60,7 @@ def is_garbage_name(name: str) -> bool:
 
 
 def main():
-    if not QCO_DB.exists():
-        log.error("qco_structured.db not found — run bis_scraper.py first.")
-        sys.exit(1)
-
+    QCO_DB.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(QCO_DB)
     conn.row_factory = sqlite3.Row
 
@@ -84,8 +81,20 @@ def main():
     """)
     conn.commit()
 
+    # If table is empty and CSV exists, load from CSV
+    count_now = conn.execute("SELECT COUNT(*) FROM qco_standards").fetchone()[0]
+    csv_path = Path("data/qco_structured.csv")
+    if count_now == 0 and csv_path.exists():
+        log.info("Loading initial records from %s ...", csv_path)
+        import csv
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            csv_rows = list(reader)
+        upsert_qco_sqlite(csv_rows)
+        log.info("Loaded %d rows from CSV into SQLite.", len(csv_rows))
+
     before = conn.execute("SELECT COUNT(*) FROM qco_standards").fetchone()[0]
-    log.info("=== BEFORE: %d total rows in qco_standards ===", before)
+    log.info("=== Current total rows in qco_standards: %d ===", before)
 
     # ── 1. Find and delete garbage rows ────────────────────────
     all_rows = conn.execute(
