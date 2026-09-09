@@ -2,7 +2,7 @@ services:
   - type: web
     name: bis-chatbot-backend
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python rebuild_qco.py && python -m backend.ingest
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     plan: free
     autoDeploy: true

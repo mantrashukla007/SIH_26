@@ -26,18 +26,18 @@ ENV/
 .env
 !.env.example
 
-# ── Generated / scraped data (too large, rebuilt by scripts) ──
+# ── Generated / database files (rebuilt automatically by scripts on Render) ──
 data/pdfs/
 data/chroma_db/
-data/raw_documents.json
 data/qco_structured.db
-data/qco_structured.csv
 data/*.log
 data/supplement.log
 data/scraper.log
 data/failed_urls.log
 
-# Keep the data/ directory itself tracked (for README reference)
+# Track raw source data texts for build scripts (< 600 KB total)
+!data/raw_documents.json
+!data/qco_structured.csv
 !data/.gitkeep
 
 # ── IDE & OS ──────────────────────────────────────────────────

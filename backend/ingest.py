@@ -143,26 +143,29 @@ def run_ingestion(reset: bool = True):
                 "doc_index":   doc_idx,
             })
 
-    log.info("Total chunks to embed: %d", len(all_chunks))
-
-    # Embed in batches via NVIDIA NIM
-    log.info("Embedding with %s via NVIDIA NIM...", NIM_EMBED_MODEL)
-    all_embeddings: list[list[float]] = []
-    for i in range(0, len(all_chunks), EMBED_BATCH_SIZE):
-        batch = all_chunks[i : i + EMBED_BATCH_SIZE]
-        log.info("  Embedding batch %d-%d / %d", i + 1, i + len(batch), len(all_chunks))
-        embs = embed_texts(batch)
-        if len(embs) != len(batch):
-            raise RuntimeError(
-                f"Embedding count mismatch: sent {len(batch)}, got {len(embs)}"
-            )
-        all_embeddings.extend(embs)
-
-    if all_embeddings:
-        dim = len(all_embeddings[0])
-        log.info("Embedding dimension: %d", dim)
-        if dim != EMBED_DIM:
-            log.warning("Expected %d dims, got %d — check the model slug.", EMBED_DIM, dim)
+    from backend.config import NVIDIA_API_KEY
+    all_embeddings = None
+    if NVIDIA_API_KEY:
+        log.info("Embedding with %s via NVIDIA NIM...", NIM_EMBED_MODEL)
+        all_embeddings = []
+        try:
+            for i in range(0, len(all_chunks), EMBED_BATCH_SIZE):
+                batch = all_chunks[i : i + EMBED_BATCH_SIZE]
+                log.info("  Embedding batch %d-%d / %d", i + 1, i + len(batch), len(all_chunks))
+                embs = embed_texts(batch)
+                if len(embs) != len(batch):
+                    raise RuntimeError(
+                        f"Embedding count mismatch: sent {len(batch)}, got {len(embs)}"
+                    )
+                all_embeddings.extend(embs)
+            if all_embeddings:
+                dim = len(all_embeddings[0])
+                log.info("Embedding dimension: %d", dim)
+        except Exception as e:
+            log.warning("Embedding skipped (%s) — storing documents for BM25 retrieval.", e)
+            all_embeddings = None
+    else:
+        log.info("NVIDIA_API_KEY not set — storing documents directly into ChromaDB for BM25.")
 
     # Store in ChromaDB
     log.info("Storing in ChromaDB at %s ...", CHROMA_DIR)
@@ -170,12 +173,14 @@ def run_ingestion(reset: bool = True):
 
     UPSERT_BATCH = 500
     for i in range(0, len(all_chunks), UPSERT_BATCH):
-        collection.upsert(
-            ids=all_ids[i : i + UPSERT_BATCH],
-            documents=all_chunks[i : i + UPSERT_BATCH],
-            embeddings=all_embeddings[i : i + UPSERT_BATCH],
-            metadatas=all_metadatas[i : i + UPSERT_BATCH],
-        )
+        upsert_kwargs = {
+            "ids": all_ids[i : i + UPSERT_BATCH],
+            "documents": all_chunks[i : i + UPSERT_BATCH],
+            "metadatas": all_metadatas[i : i + UPSERT_BATCH],
+        }
+        if all_embeddings:
+            upsert_kwargs["embeddings"] = all_embeddings[i : i + UPSERT_BATCH]
+        collection.upsert(**upsert_kwargs)
 
     final_count = collection.count()
     log.info("Ingestion complete. ChromaDB collection has %d chunks.", final_count)

@@ -31,22 +31,59 @@ def get_collection():
     if _collection is None:
         import chromadb
         client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        _collection = client.get_collection("bis_docs")
+        try:
+            _collection = client.get_collection("bis_docs")
+        except Exception:
+            _collection = client.get_or_create_collection("bis_docs", metadata={"hnsw:space": "cosine"})
+        
+        # If collection is empty, attempt auto-ingestion from raw_documents.json
+        if _collection.count() == 0:
+            try:
+                from backend.ingest import run_ingestion
+                log.info("ChromaDB collection empty — running auto-ingestion...")
+                run_ingestion(reset=False)
+            except Exception as e:
+                log.warning("Auto-ingestion failed: %s", e)
         log.info("ChromaDB collection loaded: %d chunks", _collection.count())
     return _collection
 
 
 def _build_bm25():
-    """Build BM25 index from all chunks in ChromaDB."""
+    """Build BM25 index from all chunks in ChromaDB (with raw JSON fallback)."""
     global _bm25_index, _bm25_corpus
     if _bm25_index is not None:
         return
-    log.info("Building BM25 index from ChromaDB corpus...")
-    col = get_collection()
-    result = col.get(include=["documents", "metadatas"])
-    docs  = result["documents"]
-    metas = result["metadatas"]
-    ids   = result["ids"]
+    log.info("Building BM25 index...")
+    docs, metas, ids = [], [], []
+    try:
+        col = get_collection()
+        result = col.get(include=["documents", "metadatas"])
+        docs  = result.get("documents") or []
+        metas = result.get("metadatas") or []
+        ids   = result.get("ids") or []
+    except Exception as exc:
+        log.warning("Could not read ChromaDB for BM25 (%s) — using raw JSON fallback.", exc)
+
+    if not docs:
+        import json
+        from backend.config import RAW_JSON_PATH
+        if RAW_JSON_PATH.exists():
+            try:
+                with open(RAW_JSON_PATH, encoding="utf-8") as f:
+                    raw_docs = json.load(f)
+                for idx, doc in enumerate(raw_docs):
+                    text = doc.get("raw_text", "").strip()
+                    if len(text) >= 100:
+                        ids.append(f"raw_doc_{idx}")
+                        docs.append(text)
+                        metas.append({
+                            "source_url": doc.get("source_url", "https://www.bis.gov.in"),
+                            "title": doc.get("title", "BIS Document"),
+                            "category": doc.get("category", "general"),
+                            "source_type": doc.get("source_type", "html"),
+                        })
+            except Exception as e:
+                log.warning("Raw JSON fallback failed: %s", e)
 
     tokenized = [doc.lower().split() for doc in docs]
     if tokenized:
