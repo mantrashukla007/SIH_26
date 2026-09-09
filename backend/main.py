@@ -82,6 +82,10 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "BIS Intelligent Assistant API"}
+
 # ── Request / Response models ────────────────────────────────────
 
 class HistoryMessage(BaseModel):
