@@ -75,9 +75,11 @@ def _warm_retrieval():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten for production
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # ── Request / Response models ────────────────────────────────────
@@ -435,9 +437,18 @@ async def chat_stream(req: ChatRequest):
 
         yield _sse({"type": "done"})
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache",
-                                      "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 
 def _sse(data: dict) -> str:
